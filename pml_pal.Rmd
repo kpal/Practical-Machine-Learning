@@ -1,0 +1,118 @@
+---
+title: "Understanding Correctness of Human Activities via Sensor Data"
+author: "Koushik Pal"
+date: "December 18, 2014"
+output: html_document
+---
+
+## Introduction
+
+The goal of this project is to analyse how well someone performs a given activity from the sensor data collected while the activity was being done. We will use data from accelerometer, gyroscope and magnetometer on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+## Data Collection and Preprocessing
+
+We start by downloading the data and exploring it.
+```{r}
+# Download the data from the course website
+if(!file.exists('pml-training.csv')) {
+download.file('http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 
+              'pml-training.csv')
+}
+# Load the data into R
+data <- read.csv('pml-training.csv')
+# Explore the data
+str(data)
+```
+
+We are interested in the column named `classe` (which does not appear in the above list because of truncation) as that contains information on the manner in which the activities on which data were collected for this dataset were done. Let us have a closer look at it.
+```{r}
+# Summary of the 'classe' column
+summary(data$classe)
+```
+
+Thus, there are 5 different ways in which the activities were carried out, and we are interested in classifying them  using only sensor data from the accelerometer, gyroscope and magnetometer sensors. Accordingly we preprocess the data to retain only the columns giving the sensor readings for these 3 sensors.
+```{r}
+# Subset the data to retain only the sensor data and the 'classe' column
+subsetData <- data[, Reduce(union, list(grep('^accel_',  colnames(data)),
+                                        grep('^gyros_',  colnames(data)),
+                                        grep('^magnet_', colnames(data)),
+                                        grep('classe',   colnames(data))))]
+# Check the dimension of the subset data
+dim(subsetData)
+```
+
+Thus, we have reduced the dimension of the data from 160 columns to only 37 columns.
+
+
+## Analysis using Machine Learning Techniques
+
+We intend to apply machine learning techniques for the required classification. Since the `classe` variable is a factor variable containing 5 factors A, B, C, D and E, using linear model algorithms like `lm` and `glm` won't be very helpful because they can classify only two factors at a time. Since the number of regressors/inputs is 36, it is already too high for fitting a good neural network model. Even fitting one hidden layer with more than 25 hidden nodes will be a challenge. So it is best to go with decision tree or random forest algorithms. For this project, we will go with the random forest algorithm.
+
+To start, we need to partition our dataset into two parts --- a training set, and a testing set for cross-validation.
+```{r, warning=FALSE}
+# Load the caret package
+library(caret)
+# Set the seed for reproducibility
+set.seed(1234)
+# Partition the data into a training and a testing set
+inTrain <- createDataPartition(y = subsetData$classe, p = 0.75, list = FALSE)
+training <- subsetData[inTrain, ]
+testing <-  subsetData[-inTrain, ]
+```
+
+Now we apply the randomForest function from the randomForest package in R to get our classification model. We apply the random forest algorithm with 50 trees.
+```{r}
+# Load the randomForest package
+library(randomForest)
+# Obtain the model by calling the randomForest function
+modelFitRF <- randomForest(x=training[, 1:36], y=training[, 37], ntree=50)
+# Explore the fitted model
+modelFitRF
+```
+
+Finally we use the fitted model for prediction on the testing set and get the out-of-sample error.
+```{r}
+# Use the predict function of the caret package to predict the model on the testing set
+predictRF <- predict(modelFitRF, testing)
+# Obtain the accuracy and the out-of-sample error from the confusion matrix
+confusionMatrix(predictRF, testing$classe)
+```
+
+It is clear from the `Overall Statistics` segment above that this random forest model has been able to predict the testing set really well with an accuracy of 98.57%, and hence an out-of-sample error rate of 1.43%. The model is, therefore, a good fit.
+
+
+## Predicting the model on a further test set
+
+We predict the model on a set of 20 further test cases that are provided at the course website. We start by downloading the data and preprocessing it.
+```{r}
+# Download the test file from the course website
+if(!file.exists('pml-testing.csv')) {
+download.file('http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv',
+              'pml-testing.csv')
+}
+# Load the test data into R
+testData <- read.csv('pml-testing.csv')
+# Subset the test data to retain only the sensor readings
+subTestData <- testData[, Reduce(union, list(grep('^accel_',  colnames(testData)),
+                                             grep('^gyros_',  colnames(testData)),
+                                             grep('^magnet_', colnames(testData)),
+                                             grep('classe',   colnames(testData))))]
+```
+
+Finally we do the prediction and write the predictions to several text files --- one for each of the 20 test cases.
+```{r}
+# Predict the model on the Test data
+answer <- predict(modelFitRF, subTestData)
+# Write a function for automatically creating all the 20 text files
+pmlWriteFiles = function(x){
+    n = length(x)
+    for(i in 1:n){
+        fileName = paste0("problem_id_",i,".txt")
+        if(!file.exists(fileName))
+            write.table(x[i], file=fileName, quote=FALSE, row.names=FALSE, col.names=FALSE)
+    }
+}
+# Finally write the predictions in the text files using the above function
+pmlWriteFiles(answer)
+```
